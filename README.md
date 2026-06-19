@@ -2,7 +2,7 @@
 
 Public Angular demo for the location capture pattern used in the Lafarge delivery point and reverse logistics discussions.
 
-The goal is simple: when a user searches and selects an address, the frontend captures the full address and exact coordinates from Google Places, then prepares the payload the backend needs.
+The goal is simple: when a user searches and selects an address, the frontend captures the full address and exact coordinates from Google Places, then prepares the payload the backend needs. The demo now uses the same cost-control pattern planned for LaFasLogic: debounce search, require a minimum query length, use a session token, and fetch place details only after the user selects a suggestion.
 
 ## Public Demo
 
@@ -15,11 +15,13 @@ The published demo does not include a real API key. Use the runtime API key fiel
 ## What This Demonstrates
 
 1. Load Google Maps JavaScript API with the Places library.
-2. Attach Google Places Autocomplete to an address input.
-3. Restrict suggestions to Nigeria.
-4. Request only the fields needed for this flow.
-5. Extract formatted address, latitude, longitude, and place ID.
-6. Build a backend payload.
+2. Wait for at least 3 characters and a 500ms pause before requesting predictions.
+3. Use one session token for the prediction and details phase.
+4. Restrict suggestions to Nigeria.
+5. Fetch place details only after the user selects a suggestion.
+6. Request only the fields needed for this flow.
+7. Extract formatted address, latitude, longitude, and place ID.
+8. Build a backend payload.
 
 ## Required Google Setup
 

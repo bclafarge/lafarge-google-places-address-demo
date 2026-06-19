@@ -2,14 +2,14 @@
 
 ## Scope
 
-This handoff covers address search and coordinate capture using Google Places Autocomplete.
+This handoff covers address search and coordinate capture using Google Places with request controls.
 
 The goal is to capture more than the text typed by the user. When the user selects a Google suggestion, the frontend receives the formatted address and exact coordinates. The frontend then sends those values to the backend.
 
 ## Workflow
 
 1. User types an address into the frontend input.
-2. Google Places Autocomplete returns matching suggestions.
+2. After at least 3 characters and a short debounce, Google Places returns matching suggestions.
 3. User selects one suggestion.
 4. Frontend reads:
    - formatted address
@@ -34,7 +34,8 @@ For this implementation, the application does not manually construct a Google AP
 The application code is responsible for:
 
 - loading the Google library with the correct key
-- attaching autocomplete to an input
+- creating a controlled prediction search with a session token
+- waiting for at least 3 characters and a debounce window
 - reading the selected place result
 - extracting address and coordinates
 - sending the payload to the backend

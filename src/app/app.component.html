@@ -4,14 +4,14 @@
       <p class="label">Google Places Address Capture Demo</p>
       <h1>Search an address, select a place, store the coordinates.</h1>
       <p>
-        This mirrors the Lafarge delivery point flow: the frontend uses Google
-        Places Autocomplete, extracts the formatted address plus latitude and
-        longitude, then prepares the payload the backend needs.
+        This mirrors the Lafarge delivery point flow with cost controls: the
+        frontend debounces address search, uses a Google session token, and only
+        fetches coordinates after a suggestion is selected.
       </p>
     </div>
     <div class="hero__summary">
       <span>Frontend</span>
-      <strong>Angular + Google Maps JavaScript API</strong>
+      <strong>Angular + controlled Places service</strong>
       <span>Backend payload</span>
       <strong>address + latitude + longitude</strong>
     </div>
@@ -21,7 +21,7 @@
     <form class="panel" (submit)="$event.preventDefault()">
       <div class="panel__header">
         <h2>Address Search</h2>
-        <p>Use a restricted Google Maps API key with Places API enabled.</p>
+        <p>Use a restricted Google Maps API key with Places API enabled. Searches start after 3 characters and a 500ms pause.</p>
       </div>
 
       <label class="field">
@@ -38,15 +38,31 @@
 
       <label class="field">
         <span>Search address</span>
-        <input
-          #addressInput
-          name="address"
-          type="text"
-          autocomplete="off"
-          placeholder="Type an address, e.g. Baga Road"
-          [disabled]="!mapsReady"
-          [(ngModel)]="typedAddress"
-        />
+        <div class="address-search">
+          <input
+            name="address"
+            type="text"
+            autocomplete="off"
+            placeholder="Type at least 3 characters, e.g. Baga Road"
+            [disabled]="!mapsReady"
+            [ngModel]="typedAddress"
+            (ngModelChange)="onAddressInput($event)"
+            (blur)="closePredictionList()"
+          />
+          <div class="prediction-panel" *ngIf="predictions.length || isSearching">
+            <div class="prediction-panel__state" *ngIf="isSearching">Searching...</div>
+            <button
+              type="button"
+              class="prediction-option"
+              *ngFor="let prediction of predictions"
+              (mousedown)="$event.preventDefault()"
+              (click)="selectPrediction(prediction)"
+            >
+              <strong>{{ prediction.mainText }}</strong>
+              <span *ngIf="prediction.secondaryText">{{ prediction.secondaryText }}</span>
+            </button>
+          </div>
+        </div>
       </label>
 
       <div class="button-row">
@@ -61,6 +77,25 @@
       <p class="status" [class.status--error]="loadError">
         {{ loadError || statusMessage }}
       </p>
+
+      <dl class="usage-grid">
+        <div>
+          <dt>Minimum characters</dt>
+          <dd>{{ usageSummary.minimumCharacters }}</dd>
+        </div>
+        <div>
+          <dt>Debounce</dt>
+          <dd>{{ usageSummary.debounceMs }}ms</dd>
+        </div>
+        <div>
+          <dt>Prediction requests</dt>
+          <dd>{{ usageSummary.predictionRequestsThisSession }}</dd>
+        </div>
+        <div>
+          <dt>Details call</dt>
+          <dd>{{ usageSummary.detailsCall }}</dd>
+        </div>
+      </dl>
     </form>
 
     <section class="panel">

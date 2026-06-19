@@ -1,6 +1,6 @@
 # Angular Implementation
 
-This is the implementation used by the demo app.
+This is the cost-controlled implementation used by the demo app.
 
 ## Install
 
@@ -17,56 +17,89 @@ export const environment = {
 };
 ```
 
-## Component Code
+## Core Pattern
 
 ```ts
-import { Component, ElementRef, ViewChild } from '@angular/core';
 import { importLibrary, setOptions } from '@googlemaps/js-api-loader';
-import { environment } from '../environments/environment';
 
-@Component({
-  selector: 'app-address-search',
-  template: `<input #addressInput type="text" placeholder="Search address" />`
-})
-export class AddressSearchComponent {
-  @ViewChild('addressInput') addressInput?: ElementRef<HTMLInputElement>;
+type AddressSelection = {
+  confirmedAddress: string;
+  latitude: number;
+  longitude: number;
+  source: 'GOOGLE_PLACES';
+  placeId?: string;
+};
 
-  async loadAutocomplete(): Promise<void> {
-    setOptions({
-      key: environment.mapKey,
-      v: 'weekly'
-    });
+let autocompleteService: google.maps.places.AutocompleteService;
+let placesService: google.maps.places.PlacesService;
+let sessionToken: google.maps.places.AutocompleteSessionToken | undefined;
+let debounceHandle: number | undefined;
 
-    await importLibrary('places');
+async function loadPlaces(mapKey: string) {
+  setOptions({ key: mapKey, v: 'weekly' });
+  await importLibrary('places');
 
-    const autocomplete = new google.maps.places.Autocomplete(
-      this.addressInput!.nativeElement,
+  autocompleteService = new google.maps.places.AutocompleteService();
+  placesService = new google.maps.places.PlacesService(document.createElement('div'));
+}
+
+function activeSessionToken() {
+  if (!sessionToken) {
+    sessionToken = new google.maps.places.AutocompleteSessionToken();
+  }
+  return sessionToken;
+}
+
+function searchAddress(input: string, renderPredictions: (items: google.maps.places.AutocompletePrediction[]) => void) {
+  window.clearTimeout(debounceHandle);
+
+  if (input.trim().length < 3) {
+    renderPredictions([]);
+    return;
+  }
+
+  debounceHandle = window.setTimeout(() => {
+    autocompleteService.getPlacePredictions(
       {
+        input,
         componentRestrictions: { country: 'ng' },
-        fields: ['formatted_address', 'geometry', 'place_id', 'address_components', 'name'],
+        sessionToken: activeSessionToken(),
         types: ['geocode']
+      },
+      (predictions, status) => {
+        renderPredictions(status === google.maps.places.PlacesServiceStatus.OK && predictions ? predictions : []);
       }
     );
+  }, 500);
+}
 
-    autocomplete.addListener('place_changed', () => {
-      const place = autocomplete.getPlace();
-      const location = place.geometry?.location;
-
-      if (!location) {
+function selectPrediction(
+  prediction: google.maps.places.AutocompletePrediction,
+  onSelected: (payload: AddressSelection) => void
+) {
+  placesService.getDetails(
+    {
+      placeId: prediction.place_id,
+      fields: ['formatted_address', 'geometry', 'place_id', 'name'],
+      sessionToken: activeSessionToken()
+    } as google.maps.places.PlaceDetailsRequest,
+    (place, status) => {
+      const location = place?.geometry?.location;
+      if (status !== google.maps.places.PlacesServiceStatus.OK || !location) {
         return;
       }
 
-      const payload = {
-        confirmedAddress: place.formatted_address || place.name,
+      onSelected({
+        confirmedAddress: place.formatted_address || place.name || prediction.description,
         latitude: Number(location.lat().toFixed(6)),
         longitude: Number(location.lng().toFixed(6)),
         source: 'GOOGLE_PLACES',
         placeId: place.place_id
-      };
+      });
 
-      console.log('Send this payload to backend:', payload);
-    });
-  }
+      sessionToken = undefined;
+    }
+  );
 }
 ```
 

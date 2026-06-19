@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { AfterViewInit, Component, ElementRef, ViewChild } from '@angular/core';
+import { AfterViewInit, Component } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { importLibrary, setOptions } from '@googlemaps/js-api-loader';
 import { environment } from '../environments/environment';
@@ -11,6 +11,13 @@ interface SelectedPlace {
   placeId?: string;
 }
 
+interface AddressPrediction {
+  description: string;
+  placeId: string;
+  mainText: string;
+  secondaryText: string;
+}
+
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -19,17 +26,24 @@ interface SelectedPlace {
   styleUrl: './app.component.scss'
 })
 export class AppComponent implements AfterViewInit {
-  @ViewChild('addressInput') addressInput?: ElementRef<HTMLInputElement>;
-
   typedAddress = '';
   runtimeApiKey = localStorage.getItem('googlePlacesApiKey') || '';
   mapsReady = false;
   isLoadingMaps = false;
+  isSearching = false;
   loadError = '';
-  statusMessage = 'Load Google Places, then type an address and choose a suggestion.';
+  statusMessage = 'Load Google Places, then type at least 3 characters and choose a suggestion.';
   selectedPlace: SelectedPlace | null = null;
+  predictions: AddressPrediction[] = [];
+  predictionRequestCount = 0;
 
-  private autocomplete?: google.maps.places.Autocomplete;
+  private autocompleteService?: google.maps.places.AutocompleteService;
+  private placesService?: google.maps.places.PlacesService;
+  private placesServiceHost?: HTMLDivElement;
+  private sessionToken?: google.maps.places.AutocompleteSessionToken;
+  private searchTimer?: number;
+  private predictionCache = new Map<string, AddressPrediction[]>();
+  private detailsCache = new Map<string, SelectedPlace>();
 
   get effectiveApiKey(): string {
     return this.runtimeApiKey.trim() || environment.mapKey;
@@ -50,6 +64,16 @@ export class AppComponent implements AfterViewInit {
           longitude: null,
           source: 'GOOGLE_PLACES'
         };
+  }
+
+  get usageSummary() {
+    return {
+      minimumCharacters: 3,
+      debounceMs: 500,
+      predictionRequestsThisSession: this.predictionRequestCount,
+      countryRestriction: 'NG',
+      detailsCall: 'Only after user selects a prediction'
+    };
   }
 
   ngAfterViewInit(): void {
@@ -87,9 +111,11 @@ export class AppComponent implements AfterViewInit {
       });
 
       await importLibrary('places');
+      this.autocompleteService = new google.maps.places.AutocompleteService();
+      this.placesServiceHost = document.createElement('div');
+      this.placesService = new google.maps.places.PlacesService(this.placesServiceHost);
       this.mapsReady = true;
-      this.statusMessage = 'Google Places is ready. Start typing in the address field.';
-      this.initializeAutocomplete();
+      this.statusMessage = 'Google Places is ready. Type at least 3 characters to search.';
     } catch (error) {
       console.error(error);
       this.loadError = 'Unable to load Google Places. Check the key, enabled APIs, referrer restrictions, and billing status.';
@@ -101,40 +127,151 @@ export class AppComponent implements AfterViewInit {
   clearSelection(): void {
     this.typedAddress = '';
     this.selectedPlace = null;
+    this.predictions = [];
+    this.predictionRequestCount = 0;
+    this.sessionToken = undefined;
     this.statusMessage = this.mapsReady
-      ? 'Google Places is ready. Start typing in the address field.'
-      : 'Load Google Places, then type an address and choose a suggestion.';
+      ? 'Google Places is ready. Type at least 3 characters to search.'
+      : 'Load Google Places, then type at least 3 characters and choose a suggestion.';
   }
 
-  private initializeAutocomplete(): void {
-    if (!this.addressInput?.nativeElement || this.autocomplete) {
+  onAddressInput(value: string): void {
+    this.typedAddress = value;
+    this.selectedPlace = null;
+    this.predictions = [];
+    this.loadError = '';
+
+    if (this.searchTimer) {
+      window.clearTimeout(this.searchTimer);
+    }
+
+    if (!this.mapsReady) {
       return;
     }
 
-    this.autocomplete = new google.maps.places.Autocomplete(this.addressInput.nativeElement, {
-      componentRestrictions: { country: 'ng' },
-      fields: ['formatted_address', 'geometry', 'place_id', 'address_components', 'name'],
-      types: ['geocode']
-    });
+    const query = value.trim();
+    if (query.length < 3) {
+      this.statusMessage = 'Type at least 3 characters before Google Places is queried.';
+      return;
+    }
 
-    this.autocomplete.addListener('place_changed', () => {
-      const place = this.autocomplete?.getPlace();
-      const location = place?.geometry?.location;
+    this.searchTimer = window.setTimeout(() => {
+      this.searchPredictions(query);
+    }, 500);
+  }
 
-      if (!place || !location) {
-        this.loadError = 'Select one of the Google suggestions so coordinates are returned.';
-        return;
+  async selectPrediction(prediction: AddressPrediction): Promise<void> {
+    if (!this.placesService) {
+      return;
+    }
+
+    const cached = this.detailsCache.get(prediction.placeId);
+    if (cached) {
+      this.applySelectedPlace(cached);
+      return;
+    }
+
+    this.isSearching = true;
+    this.loadError = '';
+
+    this.placesService.getDetails(
+      {
+        placeId: prediction.placeId,
+        fields: ['formatted_address', 'geometry', 'place_id', 'name'],
+        sessionToken: this.activeSessionToken()
+      } as google.maps.places.PlaceDetailsRequest,
+      (place, status) => {
+        this.isSearching = false;
+        if (status !== google.maps.places.PlacesServiceStatus.OK || !place?.geometry?.location) {
+          this.loadError = `Unable to fetch selected place details: ${status}`;
+          return;
+        }
+
+        const selectedPlace = {
+          formattedAddress: place.formatted_address || place.name || prediction.description,
+          latitude: Number(place.geometry.location.lat().toFixed(6)),
+          longitude: Number(place.geometry.location.lng().toFixed(6)),
+          placeId: place.place_id || prediction.placeId
+        };
+
+        this.detailsCache.set(prediction.placeId, selectedPlace);
+        this.applySelectedPlace(selectedPlace);
       }
+    );
+  }
 
-      this.loadError = '';
-      this.selectedPlace = {
-        formattedAddress: place.formatted_address || place.name || this.typedAddress,
-        latitude: Number(location.lat().toFixed(6)),
-        longitude: Number(location.lng().toFixed(6)),
-        placeId: place.place_id
-      };
-      this.typedAddress = this.selectedPlace.formattedAddress;
-      this.statusMessage = 'Place selected. The backend payload is ready.';
-    });
+  closePredictionList(): void {
+    window.setTimeout(() => {
+      this.predictions = [];
+    }, 200);
+  }
+
+  private searchPredictions(query: string): void {
+    if (!this.autocompleteService) {
+      return;
+    }
+
+    const cacheKey = query.toLowerCase();
+    const cached = this.predictionCache.get(cacheKey);
+    if (cached) {
+      this.predictions = cached;
+      this.statusMessage = 'Showing cached predictions for this query.';
+      return;
+    }
+
+    this.isSearching = true;
+    this.predictionRequestCount += 1;
+    this.statusMessage = 'Searching Google Places predictions...';
+
+    this.autocompleteService.getPlacePredictions(
+      {
+        input: query,
+        componentRestrictions: { country: 'ng' },
+        sessionToken: this.activeSessionToken(),
+        types: ['geocode']
+      },
+      (results, status) => {
+        this.isSearching = false;
+
+        if (status === google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
+          this.predictions = [];
+          this.statusMessage = 'No Google Places suggestions found.';
+          return;
+        }
+
+        if (status !== google.maps.places.PlacesServiceStatus.OK || !results) {
+          this.predictions = [];
+          this.loadError = `Unable to fetch predictions: ${status}`;
+          return;
+        }
+
+        this.predictions = results.map((prediction) => ({
+          description: prediction.description,
+          placeId: prediction.place_id,
+          mainText: prediction.structured_formatting?.main_text || prediction.description,
+          secondaryText: prediction.structured_formatting?.secondary_text || ''
+        }));
+        this.predictionCache.set(cacheKey, this.predictions);
+        this.statusMessage = 'Choose one of the Google suggestions to fetch coordinates.';
+      }
+    );
+  }
+
+  private applySelectedPlace(selectedPlace: SelectedPlace): void {
+    this.loadError = '';
+    this.selectedPlace = selectedPlace;
+    this.typedAddress = selectedPlace.formattedAddress;
+    this.predictions = [];
+    this.sessionToken = undefined;
+    this.statusMessage = 'Place selected. The backend payload is ready.';
+  }
+
+  private activeSessionToken(): google.maps.places.AutocompleteSessionToken {
+    if (!this.sessionToken) {
+      this.sessionToken = new google.maps.places.AutocompleteSessionToken();
+      this.predictionRequestCount = 0;
+    }
+
+    return this.sessionToken;
   }
 }

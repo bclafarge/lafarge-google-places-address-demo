@@ -1,6 +1,6 @@
 # React Variant
 
-Use this if the receiving team is implementing the same flow in React.
+Use this if the receiving team is implementing the same cost-controlled flow in React.
 
 ## Install
 
@@ -14,6 +14,15 @@ npm install @googlemaps/js-api-loader
 import { importLibrary, setOptions } from '@googlemaps/js-api-loader';
 import { useEffect, useRef, useState } from 'react';
 
+type Prediction = {
+  description: string;
+  place_id: string;
+  structured_formatting?: {
+    main_text?: string;
+    secondary_text?: string;
+  };
+};
+
 type SelectedPlace = {
   confirmedAddress: string;
   latitude: number;
@@ -23,58 +32,90 @@ type SelectedPlace = {
 };
 
 export function AddressSearch({ mapKey }: { mapKey: string }) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [query, setQuery] = useState('');
+  const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [payload, setPayload] = useState<SelectedPlace | null>(null);
+  const [isReady, setIsReady] = useState(false);
+  const autocompleteService = useRef<google.maps.places.AutocompleteService>();
+  const placesService = useRef<google.maps.places.PlacesService>();
+  const sessionToken = useRef<google.maps.places.AutocompleteSessionToken>();
 
   useEffect(() => {
-    if (!inputRef.current || !mapKey) {
+    async function init() {
+      setOptions({ key: mapKey, v: 'weekly' });
+      await importLibrary('places');
+      autocompleteService.current = new google.maps.places.AutocompleteService();
+      placesService.current = new google.maps.places.PlacesService(document.createElement('div'));
+      setIsReady(true);
+    }
+
+    if (mapKey) {
+      init();
+    }
+  }, [mapKey]);
+
+  useEffect(() => {
+    if (!isReady || query.trim().length < 3) {
+      setPredictions([]);
       return;
     }
 
-    let listener: google.maps.MapsEventListener | undefined;
+    const handle = window.setTimeout(() => {
+      if (!sessionToken.current) {
+        sessionToken.current = new google.maps.places.AutocompleteSessionToken();
+      }
 
-    async function init() {
-      setOptions({
-        key: mapKey,
-        v: 'weekly'
-      });
+      autocompleteService.current?.getPlacePredictions(
+        {
+          input: query,
+          componentRestrictions: { country: 'ng' },
+          sessionToken: sessionToken.current,
+          types: ['geocode']
+        },
+        (items, status) => {
+          setPredictions(status === google.maps.places.PlacesServiceStatus.OK && items ? items : []);
+        }
+      );
+    }, 500);
 
-      await importLibrary('places');
+    return () => window.clearTimeout(handle);
+  }, [isReady, query]);
 
-      const autocomplete = new google.maps.places.Autocomplete(inputRef.current!, {
-        componentRestrictions: { country: 'ng' },
-        fields: ['formatted_address', 'geometry', 'place_id', 'address_components', 'name'],
-        types: ['geocode']
-      });
-
-      listener = autocomplete.addListener('place_changed', () => {
-        const place = autocomplete.getPlace();
-        const location = place.geometry?.location;
-
-        if (!location) {
+  function selectPrediction(prediction: Prediction) {
+    placesService.current?.getDetails(
+      {
+        placeId: prediction.place_id,
+        fields: ['formatted_address', 'geometry', 'place_id', 'name'],
+        sessionToken: sessionToken.current
+      } as google.maps.places.PlaceDetailsRequest,
+      (place, status) => {
+        const location = place?.geometry?.location;
+        if (status !== google.maps.places.PlacesServiceStatus.OK || !location) {
           return;
         }
 
         setPayload({
-          confirmedAddress: place.formatted_address || place.name || '',
+          confirmedAddress: place.formatted_address || place.name || prediction.description,
           latitude: Number(location.lat().toFixed(6)),
           longitude: Number(location.lng().toFixed(6)),
           source: 'GOOGLE_PLACES',
           placeId: place.place_id
         });
-      });
-    }
-
-    init();
-
-    return () => {
-      listener?.remove();
-    };
-  }, [mapKey]);
+        setQuery(place.formatted_address || prediction.description);
+        setPredictions([]);
+        sessionToken.current = undefined;
+      }
+    );
+  }
 
   return (
     <section>
-      <input ref={inputRef} placeholder="Search address" />
+      <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search address" />
+      {predictions.map((prediction) => (
+        <button key={prediction.place_id} type="button" onClick={() => selectPrediction(prediction)}>
+          {prediction.description}
+        </button>
+      ))}
       <pre>{JSON.stringify(payload, null, 2)}</pre>
     </section>
   );
