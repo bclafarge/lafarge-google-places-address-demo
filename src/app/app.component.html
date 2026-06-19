@@ -1,0 +1,112 @@
+<main class="app-shell">
+  <section class="hero">
+    <div class="hero__copy">
+      <p class="label">Google Places Address Capture Demo</p>
+      <h1>Search an address, select a place, store the coordinates.</h1>
+      <p>
+        This mirrors the Lafarge delivery point flow: the frontend uses Google
+        Places Autocomplete, extracts the formatted address plus latitude and
+        longitude, then prepares the payload the backend needs.
+      </p>
+    </div>
+    <div class="hero__summary">
+      <span>Frontend</span>
+      <strong>Angular + Google Maps JavaScript API</strong>
+      <span>Backend payload</span>
+      <strong>address + latitude + longitude</strong>
+    </div>
+  </section>
+
+  <section class="workspace">
+    <form class="panel" (submit)="$event.preventDefault()">
+      <div class="panel__header">
+        <h2>Address Search</h2>
+        <p>Use a restricted Google Maps API key with Places API enabled.</p>
+      </div>
+
+      <label class="field">
+        <span>Runtime API key override</span>
+        <input
+          name="runtimeKey"
+          type="password"
+          autocomplete="off"
+          placeholder="Optional: paste a restricted browser key for local testing"
+          [(ngModel)]="runtimeApiKey"
+          (change)="saveRuntimeKey()"
+        />
+      </label>
+
+      <label class="field">
+        <span>Search address</span>
+        <input
+          #addressInput
+          name="address"
+          type="text"
+          autocomplete="off"
+          placeholder="Type an address, e.g. Baga Road"
+          [disabled]="!mapsReady"
+          [(ngModel)]="typedAddress"
+        />
+      </label>
+
+      <div class="button-row">
+        <button type="button" (click)="loadGooglePlaces()" [disabled]="isLoadingMaps">
+          {{ mapsReady ? 'Google Places Loaded' : isLoadingMaps ? 'Loading...' : 'Load Google Places' }}
+        </button>
+        <button type="button" class="button-row__ghost" (click)="clearSelection()">
+          Clear
+        </button>
+      </div>
+
+      <p class="status" [class.status--error]="loadError">
+        {{ loadError || statusMessage }}
+      </p>
+    </form>
+
+    <section class="panel">
+      <div class="panel__header">
+        <h2>Selected Place Result</h2>
+        <p>The app only sends a backend payload after the user chooses a suggestion.</p>
+      </div>
+
+      <dl class="result-grid">
+        <div>
+          <dt>Formatted address</dt>
+          <dd>{{ selectedPlace?.formattedAddress || 'No address selected yet' }}</dd>
+        </div>
+        <div>
+          <dt>Latitude</dt>
+          <dd>{{ selectedPlace?.latitude ?? 'Not available' }}</dd>
+        </div>
+        <div>
+          <dt>Longitude</dt>
+          <dd>{{ selectedPlace?.longitude ?? 'Not available' }}</dd>
+        </div>
+        <div>
+          <dt>Place ID</dt>
+          <dd>{{ selectedPlace?.placeId || 'Not available' }}</dd>
+        </div>
+      </dl>
+
+      <pre class="payload">{{ backendPayload | json }}</pre>
+    </section>
+  </section>
+
+  <section class="docs">
+    <h2>What To Share With Another Team</h2>
+    <div class="docs__grid">
+      <article>
+        <h3>Required</h3>
+        <p>Google Maps JavaScript API key, Places API enabled, frontend loader, autocomplete input, and backend fields for address, latitude, and longitude.</p>
+      </article>
+      <article>
+        <h3>Key Variants</h3>
+        <p>Use an environment key, runtime config file, CI/CD injected variable, or backend-issued restricted config. Do not commit unrestricted production keys.</p>
+      </article>
+      <article>
+        <h3>Other Languages</h3>
+        <p>The same Google concepts apply outside Angular. See the JavaScript and React examples in the documentation folder.</p>
+      </article>
+    </div>
+  </section>
+</main>
