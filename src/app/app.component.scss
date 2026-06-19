@@ -22,8 +22,7 @@
 
 .hero__copy,
 .hero__summary,
-.panel,
-.docs {
+.panel {
   border: 1px solid #d8e0d5;
   background: #ffffff;
   box-shadow: 0 18px 45px rgb(24 37 29 / 8%);
@@ -102,14 +101,12 @@ h1 {
   margin-bottom: 20px;
 }
 
-.panel__header h2,
-.docs h2 {
+.panel__header h2 {
   margin-bottom: 8px;
   font-size: 24px;
 }
 
-.panel__header p,
-.docs p {
+.panel__header p {
   margin-bottom: 0;
   color: #68746b;
   line-height: 1.55;
@@ -227,34 +224,9 @@ dd {
   padding: 18px;
 }
 
-.docs {
-  border-radius: 18px;
-  padding: 28px;
-}
-
-.docs__grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  margin-top: 18px;
-}
-
-.docs article {
-  border: 1px solid #e0e7dd;
-  border-radius: 12px;
-  background: #fbfcfb;
-  padding: 18px;
-}
-
-.docs h3 {
-  margin-bottom: 8px;
-  font-size: 16px;
-}
-
 @media (max-width: 860px) {
   .hero,
-  .workspace,
-  .docs__grid {
+  .workspace {
     grid-template-columns: 1fr;
   }
 
