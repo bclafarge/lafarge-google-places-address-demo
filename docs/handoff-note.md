@@ -22,7 +22,7 @@ The goal is to capture more than the text typed by the user. When the user selec
 
 - Google Cloud project
 - Maps JavaScript API enabled
-- Places API enabled
+- Places API (New) enabled
 - Restricted browser API key
 - Frontend implementation using Google Maps JavaScript API
 - Backend fields for address, latitude, and longitude
@@ -55,6 +55,8 @@ The key must be restricted in Google Cloud. At minimum, restrict it by HTTP refe
 ## Official Google Links
 
 - https://developers.google.com/maps/documentation/javascript/overview
-- https://developers.google.com/maps/documentation/javascript/place-autocomplete
-- https://developers.google.com/maps/documentation/javascript/places-autocomplete
+- https://developers.google.com/maps/documentation/javascript/place-autocomplete-data
+- https://developers.google.com/maps/documentation/javascript/legacy/places-migration-details
+- https://developers.google.com/maps/documentation/javascript/places-migration-overview
+- https://developers.google.com/maps/documentation/javascript/error-messages
 - https://developers.google.com/maps/api-security-best-practices

@@ -18,23 +18,16 @@ Use this when the team is not using Angular or React.
 ## JavaScript
 
 ```js
-let autocompleteService;
-let placesService;
 let sessionToken;
 let debounceHandle;
 
 window.initAddressSearch = function initAddressSearch() {
-  autocompleteService = new google.maps.places.AutocompleteService();
-  placesService = new google.maps.places.PlacesService(document.createElement('div'));
-
   const input = document.getElementById('address-input');
   input.addEventListener('input', () => searchAddress(input.value));
 };
 
 function activeSessionToken() {
-  if (!sessionToken) {
-    sessionToken = new google.maps.places.AutocompleteSessionToken();
-  }
+  sessionToken ??= new google.maps.places.AutocompleteSessionToken();
   return sessionToken;
 }
 
@@ -46,17 +39,19 @@ function searchAddress(value) {
     return;
   }
 
-  debounceHandle = window.setTimeout(() => {
-    autocompleteService.getPlacePredictions(
-      {
+  debounceHandle = window.setTimeout(async () => {
+    const { suggestions } =
+      await google.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
         input: value,
-        componentRestrictions: { country: 'ng' },
-        sessionToken: activeSessionToken(),
-        types: ['geocode']
-      },
-      (predictions, status) => {
-        renderSuggestions(status === google.maps.places.PlacesServiceStatus.OK && predictions ? predictions : []);
-      }
+        includedRegionCodes: ['ng'],
+        region: 'ng',
+        sessionToken: activeSessionToken()
+      });
+
+    renderSuggestions(
+      suggestions.flatMap((suggestion) =>
+        suggestion.placePrediction ? [suggestion.placePrediction] : []
+      )
     );
   }, 500);
 }
@@ -68,41 +63,34 @@ function renderSuggestions(predictions) {
   predictions.forEach((prediction) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = prediction.description;
+    button.textContent = prediction.text.text;
     button.onclick = () => selectPrediction(prediction);
     suggestions.appendChild(button);
   });
 }
 
-function selectPrediction(prediction) {
-  placesService.getDetails(
-    {
-      placeId: prediction.place_id,
-      fields: ['formatted_address', 'geometry', 'place_id', 'name'],
-      sessionToken: activeSessionToken()
-    },
-    (place, status) => {
-      const location = place && place.geometry && place.geometry.location;
-      if (status !== google.maps.places.PlacesServiceStatus.OK || !location) {
-        return;
-      }
+async function selectPrediction(prediction) {
+  const place = prediction.toPlace();
+  await place.fetchFields({ fields: ['formattedAddress', 'location', 'displayName'] });
 
-      const payload = {
-        confirmedAddress: place.formatted_address || place.name || prediction.description,
-        latitude: Number(location.lat().toFixed(6)),
-        longitude: Number(location.lng().toFixed(6)),
-        source: 'GOOGLE_PLACES',
-        placeId: place.place_id
-      };
+  if (!place.location) {
+    return;
+  }
 
-      sessionToken = undefined;
-      renderSuggestions([]);
-      console.log('Send this payload to backend:', payload);
-    }
-  );
+  const payload = {
+    confirmedAddress: place.formattedAddress || place.displayName || prediction.text.text,
+    latitude: Number(place.location.lat().toFixed(6)),
+    longitude: Number(place.location.lng().toFixed(6)),
+    source: 'GOOGLE_PLACES',
+    placeId: place.id
+  };
+
+  sessionToken = undefined;
+  renderSuggestions([]);
+  console.log('Send this payload to backend:', payload);
 }
 ```
 
 ## Notes
 
-This version avoids one request per keystroke by waiting for at least 3 characters and a 500ms pause before requesting predictions. Coordinates are fetched only after the user selects a suggestion.
+This version avoids one request per keystroke by waiting for at least 3 characters and a 500ms pause before requesting predictions. Coordinates are fetched only after the user selects a suggestion. It uses `AutocompleteSuggestion` and `Place`, not the legacy `AutocompleteService` and `PlacesService` classes.

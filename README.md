@@ -29,7 +29,7 @@ In Google Cloud:
 
 1. Create or select a Google Cloud project.
 2. Enable **Maps JavaScript API**.
-3. Enable **Places API**.
+3. Enable **Places API (New)**.
 4. Create an API key.
 5. Restrict the key by HTTP referrer/domain.
 6. Restrict the key to only the APIs needed by the application.
@@ -87,8 +87,10 @@ Expose a small endpoint such as `/public-config` that returns the restricted bro
 ## Official Google Documentation
 
 - [Google Maps JavaScript API overview](https://developers.google.com/maps/documentation/javascript/overview)
-- [Places Autocomplete for Maps JavaScript API](https://developers.google.com/maps/documentation/javascript/place-autocomplete)
-- [Place Autocomplete data fields](https://developers.google.com/maps/documentation/javascript/places-autocomplete)
+- [Place Autocomplete Data API](https://developers.google.com/maps/documentation/javascript/place-autocomplete-data)
+- [Migrate to the new Place class](https://developers.google.com/maps/documentation/javascript/legacy/places-migration-details)
+- [Places migration overview](https://developers.google.com/maps/documentation/javascript/places-migration-overview)
+- [Google Maps JavaScript API error messages](https://developers.google.com/maps/documentation/javascript/error-messages)
 - [API key restrictions](https://developers.google.com/maps/api-security-best-practices)
 
 ## Local Development
@@ -99,3 +101,9 @@ npm start
 ```
 
 Open `http://localhost:4200`.
+
+## Troubleshooting
+
+- `ExpiredKeyMapError`: the supplied credential has expired. Create or select a valid browser key in Google Cloud, apply HTTP referrer and API restrictions, then replace the saved runtime key. The application cannot renew an expired key.
+- If a previously entered key is still being used, clear the runtime API key field or remove `googlePlacesApiKey` from browser local storage, enter the replacement key, and reload the page.
+- New Google Maps Platform projects must use **Places API (New)**. The demo uses `AutocompleteSuggestion.fetchAutocompleteSuggestions()` and `Place.fetchFields()` rather than the legacy `AutocompleteService` and `PlacesService` classes.

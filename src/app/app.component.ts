@@ -16,6 +16,7 @@ interface AddressPrediction {
   placeId: string;
   mainText: string;
   secondaryText: string;
+  placePrediction: google.maps.places.PlacePrediction;
 }
 
 @Component({
@@ -37,11 +38,10 @@ export class AppComponent implements AfterViewInit {
   predictions: AddressPrediction[] = [];
   predictionRequestCount = 0;
 
-  private autocompleteService?: google.maps.places.AutocompleteService;
-  private placesService?: google.maps.places.PlacesService;
-  private placesServiceHost?: HTMLDivElement;
+  private autocompleteSuggestion?: typeof google.maps.places.AutocompleteSuggestion;
   private sessionToken?: google.maps.places.AutocompleteSessionToken;
   private searchTimer?: number;
+  private searchRequestSequence = 0;
   private predictionCache = new Map<string, AddressPrediction[]>();
   private detailsCache = new Map<string, SelectedPlace>();
 
@@ -104,16 +104,21 @@ export class AppComponent implements AfterViewInit {
 
     this.isLoadingMaps = true;
 
+    const mapsWindow = window as Window & { gm_authFailure?: () => void };
+    mapsWindow.gm_authFailure = () => {
+      this.mapsReady = false;
+      this.isLoadingMaps = false;
+      this.loadError = 'Google rejected this API key. Replace expired or invalid keys and verify referrer restrictions, Maps JavaScript API, Places API (New), and billing.';
+    };
+
     try {
       setOptions({
         key: this.effectiveApiKey,
         v: 'weekly'
       });
 
-      await importLibrary('places');
-      this.autocompleteService = new google.maps.places.AutocompleteService();
-      this.placesServiceHost = document.createElement('div');
-      this.placesService = new google.maps.places.PlacesService(this.placesServiceHost);
+      const { AutocompleteSuggestion } = await importLibrary('places');
+      this.autocompleteSuggestion = AutocompleteSuggestion;
       this.mapsReady = true;
       this.statusMessage = 'Google Places is ready. Type at least 3 characters to search.';
     } catch (error) {
@@ -125,10 +130,12 @@ export class AppComponent implements AfterViewInit {
   }
 
   clearSelection(): void {
+    this.searchRequestSequence += 1;
     this.typedAddress = '';
     this.selectedPlace = null;
     this.predictions = [];
     this.predictionRequestCount = 0;
+    this.predictionCache.clear();
     this.sessionToken = undefined;
     this.statusMessage = this.mapsReady
       ? 'Google Places is ready. Type at least 3 characters to search.'
@@ -136,10 +143,12 @@ export class AppComponent implements AfterViewInit {
   }
 
   onAddressInput(value: string): void {
+    this.searchRequestSequence += 1;
     this.typedAddress = value;
     this.selectedPlace = null;
     this.predictions = [];
     this.loadError = '';
+    this.isSearching = false;
 
     if (this.searchTimer) {
       window.clearTimeout(this.searchTimer);
@@ -161,10 +170,6 @@ export class AppComponent implements AfterViewInit {
   }
 
   async selectPrediction(prediction: AddressPrediction): Promise<void> {
-    if (!this.placesService) {
-      return;
-    }
-
     const cached = this.detailsCache.get(prediction.placeId);
     if (cached) {
       this.applySelectedPlace(cached);
@@ -174,30 +179,31 @@ export class AppComponent implements AfterViewInit {
     this.isSearching = true;
     this.loadError = '';
 
-    this.placesService.getDetails(
-      {
-        placeId: prediction.placeId,
-        fields: ['formatted_address', 'geometry', 'place_id', 'name'],
-        sessionToken: this.activeSessionToken()
-      } as google.maps.places.PlaceDetailsRequest,
-      (place, status) => {
-        this.isSearching = false;
-        if (status !== google.maps.places.PlacesServiceStatus.OK || !place?.geometry?.location) {
-          this.loadError = `Unable to fetch selected place details: ${status}`;
-          return;
-        }
+    try {
+      const place = prediction.placePrediction.toPlace();
+      await place.fetchFields({
+        fields: ['formattedAddress', 'location', 'displayName']
+      });
 
-        const selectedPlace = {
-          formattedAddress: place.formatted_address || place.name || prediction.description,
-          latitude: Number(place.geometry.location.lat().toFixed(6)),
-          longitude: Number(place.geometry.location.lng().toFixed(6)),
-          placeId: place.place_id || prediction.placeId
-        };
-
-        this.detailsCache.set(prediction.placeId, selectedPlace);
-        this.applySelectedPlace(selectedPlace);
+      if (!place.location) {
+        throw new Error('The selected place did not return coordinates.');
       }
-    );
+
+      const selectedPlace = {
+        formattedAddress: place.formattedAddress || place.displayName || prediction.description,
+        latitude: Number(place.location.lat().toFixed(6)),
+        longitude: Number(place.location.lng().toFixed(6)),
+        placeId: place.id || prediction.placeId
+      };
+
+      this.detailsCache.set(prediction.placeId, selectedPlace);
+      this.applySelectedPlace(selectedPlace);
+    } catch (error) {
+      console.error(error);
+      this.loadError = 'Unable to fetch selected place details. Check the API key and Places API (New) configuration.';
+    } finally {
+      this.isSearching = false;
+    }
   }
 
   closePredictionList(): void {
@@ -206,8 +212,8 @@ export class AppComponent implements AfterViewInit {
     }, 200);
   }
 
-  private searchPredictions(query: string): void {
-    if (!this.autocompleteService) {
+  private async searchPredictions(query: string): Promise<void> {
+    if (!this.autocompleteSuggestion) {
       return;
     }
 
@@ -223,45 +229,55 @@ export class AppComponent implements AfterViewInit {
     this.predictionRequestCount += 1;
     this.statusMessage = 'Searching Google Places predictions...';
 
-    this.autocompleteService.getPlacePredictions(
-      {
+    const requestSequence = ++this.searchRequestSequence;
+
+    try {
+      const { suggestions } = await this.autocompleteSuggestion.fetchAutocompleteSuggestions({
         input: query,
-        componentRestrictions: { country: 'ng' },
+        includedRegionCodes: ['ng'],
+        region: 'ng',
+        language: 'en',
         sessionToken: this.activeSessionToken(),
-        types: ['geocode']
-      },
-      (results, status) => {
-        this.isSearching = false;
+      });
 
-        if (status === google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
-          this.predictions = [];
-          this.statusMessage = 'No Google Places suggestions found.';
-          return;
-        }
-
-        if (status !== google.maps.places.PlacesServiceStatus.OK || !results) {
-          this.predictions = [];
-          this.loadError = `Unable to fetch predictions: ${status}`;
-          return;
-        }
-
-        this.predictions = results.map((prediction) => ({
-          description: prediction.description,
-          placeId: prediction.place_id,
-          mainText: prediction.structured_formatting?.main_text || prediction.description,
-          secondaryText: prediction.structured_formatting?.secondary_text || ''
-        }));
-        this.predictionCache.set(cacheKey, this.predictions);
-        this.statusMessage = 'Choose one of the Google suggestions to fetch coordinates.';
+      if (requestSequence !== this.searchRequestSequence) {
+        return;
       }
-    );
+
+      this.predictions = suggestions.flatMap((suggestion) => {
+        const prediction = suggestion.placePrediction;
+        return prediction
+          ? [{
+              description: prediction.text.text,
+              placeId: prediction.placeId,
+              mainText: prediction.mainText?.text || prediction.text.text,
+              secondaryText: prediction.secondaryText?.text || '',
+              placePrediction: prediction
+            }]
+          : [];
+      });
+      this.predictionCache.set(cacheKey, this.predictions);
+      this.statusMessage = this.predictions.length
+        ? 'Choose one of the Google suggestions to fetch coordinates.'
+        : 'No Google Places suggestions found.';
+    } catch (error) {
+      console.error(error);
+      this.predictions = [];
+      this.loadError = 'Unable to fetch predictions. Check the API key and Places API (New) configuration.';
+    } finally {
+      if (requestSequence === this.searchRequestSequence) {
+        this.isSearching = false;
+      }
+    }
   }
 
   private applySelectedPlace(selectedPlace: SelectedPlace): void {
+    this.searchRequestSequence += 1;
     this.loadError = '';
     this.selectedPlace = selectedPlace;
     this.typedAddress = selectedPlace.formattedAddress;
     this.predictions = [];
+    this.predictionCache.clear();
     this.sessionToken = undefined;
     this.statusMessage = 'Place selected. The backend payload is ready.';
   }
@@ -270,6 +286,7 @@ export class AppComponent implements AfterViewInit {
     if (!this.sessionToken) {
       this.sessionToken = new google.maps.places.AutocompleteSessionToken();
       this.predictionRequestCount = 0;
+      this.predictionCache.clear();
     }
 
     return this.sessionToken;

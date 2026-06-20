@@ -1,6 +1,6 @@
 # Angular Implementation
 
-This is the cost-controlled implementation used by the demo app.
+This is the cost-controlled implementation used by the demo app. It uses the current Places API classes introduced for new Google Maps Platform customers.
 
 ## Install
 
@@ -27,30 +27,27 @@ type AddressSelection = {
   latitude: number;
   longitude: number;
   source: 'GOOGLE_PLACES';
-  placeId?: string;
+  placeId: string;
 };
 
-let autocompleteService: google.maps.places.AutocompleteService;
-let placesService: google.maps.places.PlacesService;
+let autocompleteSuggestion: typeof google.maps.places.AutocompleteSuggestion;
 let sessionToken: google.maps.places.AutocompleteSessionToken | undefined;
 let debounceHandle: number | undefined;
 
 async function loadPlaces(mapKey: string) {
   setOptions({ key: mapKey, v: 'weekly' });
-  await importLibrary('places');
-
-  autocompleteService = new google.maps.places.AutocompleteService();
-  placesService = new google.maps.places.PlacesService(document.createElement('div'));
+  ({ AutocompleteSuggestion: autocompleteSuggestion } = await importLibrary('places'));
 }
 
 function activeSessionToken() {
-  if (!sessionToken) {
-    sessionToken = new google.maps.places.AutocompleteSessionToken();
-  }
+  sessionToken ??= new google.maps.places.AutocompleteSessionToken();
   return sessionToken;
 }
 
-function searchAddress(input: string, renderPredictions: (items: google.maps.places.AutocompletePrediction[]) => void) {
+function searchAddress(
+  input: string,
+  renderPredictions: (items: google.maps.places.PlacePrediction[]) => void
+) {
   window.clearTimeout(debounceHandle);
 
   if (input.trim().length < 3) {
@@ -58,50 +55,46 @@ function searchAddress(input: string, renderPredictions: (items: google.maps.pla
     return;
   }
 
-  debounceHandle = window.setTimeout(() => {
-    autocompleteService.getPlacePredictions(
-      {
-        input,
-        componentRestrictions: { country: 'ng' },
-        sessionToken: activeSessionToken(),
-        types: ['geocode']
-      },
-      (predictions, status) => {
-        renderPredictions(status === google.maps.places.PlacesServiceStatus.OK && predictions ? predictions : []);
-      }
+  debounceHandle = window.setTimeout(async () => {
+    const { suggestions } = await autocompleteSuggestion.fetchAutocompleteSuggestions({
+      input,
+      includedRegionCodes: ['ng'],
+      region: 'ng',
+      sessionToken: activeSessionToken()
+    });
+
+    renderPredictions(
+      suggestions.flatMap((suggestion) =>
+        suggestion.placePrediction ? [suggestion.placePrediction] : []
+      )
     );
   }, 500);
 }
 
-function selectPrediction(
-  prediction: google.maps.places.AutocompletePrediction,
+async function selectPrediction(
+  prediction: google.maps.places.PlacePrediction,
   onSelected: (payload: AddressSelection) => void
 ) {
-  placesService.getDetails(
-    {
-      placeId: prediction.place_id,
-      fields: ['formatted_address', 'geometry', 'place_id', 'name'],
-      sessionToken: activeSessionToken()
-    } as google.maps.places.PlaceDetailsRequest,
-    (place, status) => {
-      const location = place?.geometry?.location;
-      if (status !== google.maps.places.PlacesServiceStatus.OK || !location) {
-        return;
-      }
+  const place = prediction.toPlace();
+  await place.fetchFields({ fields: ['formattedAddress', 'location', 'displayName'] });
 
-      onSelected({
-        confirmedAddress: place.formatted_address || place.name || prediction.description,
-        latitude: Number(location.lat().toFixed(6)),
-        longitude: Number(location.lng().toFixed(6)),
-        source: 'GOOGLE_PLACES',
-        placeId: place.place_id
-      });
+  if (!place.location) {
+    return;
+  }
 
-      sessionToken = undefined;
-    }
-  );
+  onSelected({
+    confirmedAddress: place.formattedAddress || place.displayName || prediction.text.text,
+    latitude: Number(place.location.lat().toFixed(6)),
+    longitude: Number(place.location.lng().toFixed(6)),
+    source: 'GOOGLE_PLACES',
+    placeId: place.id
+  });
+
+  sessionToken = undefined;
 }
 ```
+
+The token supplied to `fetchAutocompleteSuggestions()` is automatically applied to the first `fetchFields()` call on the `Place` returned by `prediction.toPlace()`.
 
 ## Required Backend Fields
 
